@@ -1,33 +1,79 @@
 ﻿using System.Collections;
 using System.Collections.Generic;
 using UnityEngine;
+using UnityEngine.Events;
 using System.IO;
+using Qitz.DataUtil;
+using LitJson;
 
-
-public class TypeBanWord
+public class BanWordList
 {
-    public string type;
-    public string word;
+    public string[] KRword;
+    public string[] ENword;
+}
+
+public class Langauge
+{
+    public string KR;
+    public string EN;
+    //public string RU;
+    //public string FR;
+    //public string DE;
+    //public string FA;
 }
 
 public class WordDetecter : MonoBehaviour
 {
+    public const string version_url = "https://docs.google.com/spreadsheets/d/1qpYs5XfAOIEOoQ8zohFnSkSxCWuMiYrmw3KcL-_8TD8/edit#gid=0";
+    
+    public Dictionary<string, List<string>> BanWord = new Dictionary<string, List<string>>();
+    BanWordList banwordlist = new BanWordList();
+    List<string> RecordMsg = new List<string>();
 
-    //public Dictionary<string, TypeBanWord> BanWord = new Dictionary<string, TypeBanWord>();
-    List<string> BanWord = new List<string>();
+    List<string> KRwordlist = new List<string>();
+    List<string> ENwordlist = new List<string>();
 
+    private void Awake()
+    {
+        //시작할때 미리 금지어 리스트를 로드
+        //TypeBanWord banword = CheckcurLanguage();
+        //InsertForbbidenWord(banword.type);
+    }
     private void Start()
     {
-        //Test msg
-        //Debug.LogError(CheckBanChatting("신발 신고 다니지마라"));
+        Application.runInBackground = true;
+
+        StartCoroutine(SheetLoadJson(version_url));
+    }
+    public IEnumerator SheetLoadJson(string url)
+    {
+        yield return JsonFromGoogleSpreadSheet.GetJsonArrayFromGoogleSpreadSheetUrl(url, (jsonArray) =>
+        {
+            foreach (var json in jsonArray)
+            {
+                Langauge severModel = JsonMapper.ToObject<Langauge>(json.ToString());
+
+                KRwordlist.Add(severModel.KR);
+                ENwordlist.Add(severModel.EN);
+
+            }
+        });
+
+        BanWord.Add("ko", KRwordlist);
+        BanWord.Add("en", ENwordlist);
+        //BanWord.Add("ru", banwordlist.RUword);
+        //BanWord.Add("fr", banwordlist.FRword);
+        //BanWord.Add("de", banwordlist.DEword);
+        //BanWord.Add("fa", banwordlist.FAword);
+        //Debug.LogError(CheckBanChatting("신발 좀 벗고 다니세요."));
+        yield return null;
     }
     public string CheckBanChatting(string msg)
     {
-        //TypeBanWord banword = CheckcurLanguage();
-        //InsertForbbidenWord(banword.type);
-        InsertForbbidenWord("sample");
+        string curlan = GameOptionManager.Instance.curLanguageCode;
+        //InsertForbbidenWord("sample");
 
-        foreach (var word in BanWord)
+        foreach (var word in BanWord[curlan])
         {
             if (msg.Contains(word))
             {
@@ -41,75 +87,79 @@ public class WordDetecter : MonoBehaviour
         }
         return msg;
     }
-
-    public void CheckOverlapChatting(string msg)
+    public void UpdateRecordChatting(string msg, int limit)
     {
+        int lastindex = RecordMsg.Count - 1;
 
-    }
-
-    public TypeBanWord CheckcurLanguage()
-    {
-        string curlan = GameOptionManager.Instance.curLanguageCode;
-
-        TypeBanWord banword = new TypeBanWord();
-
-        switch (curlan)
+        if(RecordMsg.Count < limit + 1)
         {
-            case "en":
-                banword.type = "English";
-                break;
+            RecordMsg.Add(msg);
 
-            case "kr":
-                banword.type = "Korean";
-                break;
-
-            case "ru":
-                banword.type = "Russian";
-                break;
-
-            case "fr":
-                banword.type = "French";
-                break;
-
-            case "de":
-                banword.type = "Germany";
-                break;
-
-            case "fa":
-                banword.type = "Farsi";
-                break;
-        }
-        return banword;
-    }
-    public void InsertForbbidenWord(string lan)
-    {
-        string templan = lan;
-        templan += ".txt";
-
-        string filepath = "Assets/Resources/ForbiddenText/kr.txt";
-#if UNITY_EDITOR
-        
-#elif UNITY_IOS
-
-#elif UNITY_ANDROID
-
-#endif
-        //filepath = Path.Combine(Application.streamingAssetsPath, templan);
-        
-        ReadTxt(filepath);
-    }
-
-    public void ReadTxt(string filepath)
-    {
-        string[] forbiddenWord = null;
-
-        if(File.Exists(filepath))
-        {
-            forbiddenWord = File.ReadAllLines(filepath);
-            for(int i = 0; i < forbiddenWord.Length; i++)
+            if (IsOverlapChatting(limit))
             {
-                BanWord.Add(forbiddenWord[i]);
+                Debug.LogError("채팅 중복가능 횟수 초과");
+                return;
             }
         }
+        else
+        {
+            List<string> tempList = new List<string>();
+
+            tempList.Add(RecordMsg[lastindex]);
+
+            for(int i = 1; i < limit + 1; i++)
+            {
+                if (RecordMsg[lastindex].Equals(RecordMsg[lastindex - i]))
+                {
+                    tempList.Add(RecordMsg[lastindex - i]);
+                }
+                else
+                {
+                    break;
+                }
+            }
+            ResetRecordList();
+            RecordMsg = tempList;
+        }
+    }
+    //도배 여부 파악
+    public bool IsOverlapChatting(int limit)
+    {
+        
+        string prev = null;
+        int count = 0;
+
+        if(RecordMsg.Count == limit)
+        {
+            string current = RecordMsg[RecordMsg.Count - 1];
+            int lastindex = RecordMsg.Count - 1;
+            
+            int num = current.Length / 2;
+            string halfstr = current.IndexOf(0, num);
+
+            for (int i = 1; i < limit + 1; i++)
+            {
+                prev = RecordMsg[lastindex - i];
+                if(prev.Contains(halfstr)){
+                    count += 1;
+                }
+                else
+                {
+                    return false;
+                }
+            }
+
+            if(count == limit)
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    public void ResetRecordList()
+    {
+        RecordMsg.Clear();
     }
 }
